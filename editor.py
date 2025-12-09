@@ -23,10 +23,37 @@ def draw_title(stdscr, filename, filetype):
     except curses.error:
         pass
 
+_prev_menu_rows = 0  # tracks how many menu rows were drawn last time
+
 def draw_menu(stdscr, height):
+    global _prev_menu_rows
     menu = "^G Help  ^O Write Out  ^W Where Is  ^\\ Replace  ^_ GoTo  ^K Cut  ^U Paste  ^Z Undo  ^Y Redo  ^X Exit"
-    stdscr.addstr(height-2, 0, "-"*(curses.COLS-1))
-    stdscr.addstr(height-1, 0, menu)
+
+    width = curses.COLS - 1
+    divider_row = height - 2
+    last_row = height - 1
+    for r in range(last_row - _prev_menu_rows + 1, last_row + 1):
+        if r >= 1:
+            try:
+                stdscr.move(r, 0)
+                stdscr.clrtoeol()
+            except curses.error:
+                pass
+    try:
+        stdscr.addstr(divider_row, 0, "-" * width)
+    except curses.error:
+        pass
+    chunks = [menu[i:i + width] for i in range(0, len(menu), width)]
+    row = last_row
+    for chunk in reversed(chunks):
+        if row < 1:
+            break
+        try:
+            stdscr.addstr(row, 0, chunk)
+        except curses.error:
+            pass
+        row -= 1
+    _prev_menu_rows = len(chunks)
 
 def draw_status(stdscr, message, height):
     stdscr.addstr(height-3, 0, message.ljust(curses.COLS-1))
@@ -58,6 +85,24 @@ def detect_filetype(filename):
     if filename and filename.endswith('.py'):
         return 'python'
     return 'text'
+
+def disable_ctrl_z():
+    try:
+        fd = sys.stdin.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[6][termios.VSUSP] = 0
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
+def restore_ctrl_z():
+    try:
+        fd = sys.stdin.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[6][termios.VSUSP] = b'\x1A'
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
 
 def editor(stdscr, filename=None):
     curses.curs_set(1)
@@ -93,7 +138,13 @@ def editor(stdscr, filename=None):
     while True:
         stdscr.clear()
         height, width = stdscr.getmaxyx()
-        text_height = height - 4  # Adjust because title+status+menu
+
+        # Compute dynamic menu height
+        menu_text = "^G Help  ^O Write Out  ^W Where Is  ^\\ Replace  ^_ GoTo  ^K Cut  ^U Paste  ^Z Undo  ^Y Redo  ^X Exit"
+        menu_chunks = [menu_text[i:i+width-1] for i in range(0, len(menu_text), width-1)]
+        menu_height = len(menu_chunks)
+
+        text_height = height - 4 - menu_height  # shrink text area to leave room for menu
         text_width = width - LINE_NUMBER_WIDTH
 
         if cursor_y < screen_y_offset:
@@ -300,24 +351,6 @@ def editor(stdscr, filename=None):
             lines[cursor_y] = lines[cursor_y][:cursor_x] + chr(key) + lines[cursor_y][cursor_x:]
             cursor_x += 1
 
-def disable_ctrl_z():
-    fd = sys.stdin.fileno()
-    try:
-        attrs = termios.tcgetattr(fd)
-        attrs[6][termios.VSUSP] = 0  # disable suspend (Ctrl-Z makes processes go into background, in linux)
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-    except Exception:
-        pass
-
-def restore_ctrl_z():
-    fd = sys.stdin.fileno()
-    try:
-        attrs = termios.tcgetattr(fd)
-        attrs[6][termios.VSUSP] = b'\x1A'  # restore Ctrl-Z
-        termios.tcsetattr(fd, termios.TCSANOW, attrs)
-    except Exception:
-        pass
-
 def main():
     script_name = os.path.basename(sys.argv[0])
     if len(sys.argv) == 2 and sys.argv[1] == '--recent':
@@ -349,3 +382,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
