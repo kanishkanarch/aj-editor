@@ -1,3 +1,4 @@
+import termios
 import curses
 import sys
 import os
@@ -299,6 +300,24 @@ def editor(stdscr, filename=None):
             lines[cursor_y] = lines[cursor_y][:cursor_x] + chr(key) + lines[cursor_y][cursor_x:]
             cursor_x += 1
 
+def disable_ctrl_z():
+    fd = sys.stdin.fileno()
+    try:
+        attrs = termios.tcgetattr(fd)
+        attrs[6][termios.VSUSP] = 0  # disable suspend (Ctrl-Z makes processes go into background, in linux)
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
+def restore_ctrl_z():
+    fd = sys.stdin.fileno()
+    try:
+        attrs = termios.tcgetattr(fd)
+        attrs[6][termios.VSUSP] = b'\x1A'  # restore Ctrl-Z
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
 def main():
     script_name = os.path.basename(sys.argv[0])
     if len(sys.argv) == 2 and sys.argv[1] == '--recent':
@@ -322,7 +341,11 @@ def main():
         filename = None
         print(f"Starting a new buffer (no filename). You can save it later with Ctrl-O.")
 
-    curses.wrapper(editor, filename)
+    disable_ctrl_z()
+    try:
+        curses.wrapper(editor, filename)
+    finally:
+        restore_ctrl_z()
 
 if __name__ == "__main__":
     main()
